@@ -6,6 +6,14 @@ from datetime import datetime
 import data_input
 import models
 
+"""
+Based on Campanella et al, Clinical-grade computational pathology using weakly supervised deep 
+learning on whole slide images, Nature Medicine 2019
+https://github.com/MSKCC-Computational-Pathology/MIL-nature-medicine-2019
+Implemented in Tensorflow 1.10
+"""
+
+
 class MIL:
 
     """
