@@ -130,8 +130,8 @@ class MIL:
                 if verbose:
                     print('end of iteration. {} predictions'.format(str(len(pred))))
                 break
-        pred = np.asarray(pred)
-        print(pred)
+        pred = np.asarray(pred)  # pred is an array of n_predictions by n_class
+        #print(pred)
         return pred
 
     def train(self, data_dir, out_dir, slides, top_k=10, n_epoch=10, batch_size=128, save=True):
@@ -156,7 +156,7 @@ class MIL:
                     slide_data = data_input.DataSet(inputs=[data_dir + '/' + slide], batch_size=batch_size)
                     slide_iter = slide_data.batch_iter()
                     pred = self.inference(slide_iter, verbose=False)
-                    pred_1 = pred[:,1]
+                    pred_1 = pred[:, 1]
                     threshold = pred_1[pred_1.argsort()][-top_k]
                     slide_pred = tf.data.Dataset.from_tensor_slices((pred_1))
                     data_pred = tf.data.Dataset.zip((slide_data.get_data(), slide_pred))

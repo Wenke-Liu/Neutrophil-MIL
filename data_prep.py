@@ -46,7 +46,7 @@ def v_slide(slp, s_id, n_y, x, y, tile_size, step_size, out_dir, x0, std=np.asar
         img = slide.read_region((image_x, image_y), 0, (tile_size, tile_size))
         wscore = bgcheck(img)
         # output png files if an output directory is given
-        if wscore < 0.5:
+        if wscore < 0.8:
             tile_name = s_id + '_tile_x_{}_y_{}.png'.format(str(image_x).zfill(6), str(image_y).zfill(6))
             if std.any():
                 img = normalization(img, std)
@@ -227,8 +227,9 @@ def main():  # run as main
 
         if args.dic_dir: # if save tile info in csv
             imlocpd.to_csv(args.dic_dir + '/' + f_id + "_dict.csv", index=False)
+            print('Tile info saved in: ' + args.dic_dir + '/' + f_id + "_dict.csv")
 
-        if args.tfr_dir: # if output TFRecords files for future training
+        if args.tfr_dir:  # if output TFRecords files for future training
 
             tf_fn = args.tfr_dir + '/' + f_id + '.tfrecords'
             writer = tf.python_io.TFRecordWriter(tf_fn)
@@ -236,7 +237,7 @@ def main():  # run as main
                 s_lab  # if slide level labels are available
                 try: # get slide level label from input dictionary
                     lab = int(s_lab[f_id])
-                    print('slide {} label: {}'.format(f_id,str(lab)))
+                    print('slide {} label: {}'.format(f_id, str(lab)))
                 except KeyError:  # if slide id not in the label list
                     lab = 999  # numeric code for missing value
                     print('slide {} has no label: coded as {}'.format(f_id, str(lab)))
