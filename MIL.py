@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tensorflow as tf
 import numpy as np
@@ -12,7 +13,6 @@ learning on whole slide images, Nature Medicine 2019
 https://github.com/MSKCC-Computational-Pathology/MIL-nature-medicine-2019
 Implemented in Tensorflow 1.10
 """
-
 
 class MIL:
 
@@ -37,6 +37,7 @@ class MIL:
         self.dropout = dropout
         self.n_class = n_class
         self.epoch_trained = 0
+        self.epoch_pretrained = 0
 
         self.sesh = tf.Session()
 
@@ -50,7 +51,7 @@ class MIL:
             self.sesh.run(tf.global_variables_initializer())
 
         else:  # restore saved model
-            model_datetime, model_name = os.path.basename(meta_graph).split("_MIL_")
+            model_datetime, model_name = re.split("_MIL_|_preMIL_", os.path.basename(meta_graph))
             self.datetime = "{}_reloaded".format(model_datetime)
             self.architecture, _ = model_name.split("_lr_")
 
@@ -72,7 +73,7 @@ class MIL:
             except FileExistsError:
                 pass
             self.train_logger = tf.summary.FileWriter(log_dir + '/training', self.sesh.graph)
-            #self.valid_logger = tf.summary.FileWriter(log_dir + '/validation', self.sesh.graph)
+            self.pretrain_logger = tf.summary.FileWriter(log_dir + '/pretraining', self.sesh.graph)
 
     def _buildGraph(self):
         x_in = tf.placeholder(tf.float32, shape=[None, 299, 299, 3])
@@ -116,6 +117,59 @@ class MIL:
                 logits, pred, cost,
                 global_step, train_op, merged_summary)
 
+    def pre_train(self, pretrain_data_path, out_dir, n_epoch=10, batch_size=128, save=True):
+        """
+        Pretrain the model with tile level labels before MIL (the train method below)
+        """
+        pretrain_data = data_input.DataSet(inputs=pretrain_data_path, batch_size=batch_size)
+        if save:
+            saver = tf.train.Saver(tf.global_variables(), max_to_keep=None)
+            outfile = os.path.join(os.path.abspath(out_dir), "{}_preMIL_{}_lr_{}_drop_{}".format(
+                str(self.datetime), str(self.architecture),
+                str(self.learning_rate), str(self.dropout)))
+
+        now = datetime.now().isoformat()[11:]
+        print("------- Pre-training begin: {} -------\n".format(now))
+        try:
+            for epoch in range(n_epoch):
+                pretrain_iter = pretrain_data.shuffled_iter()
+                err_train = 0
+                epoch_batch = 0
+                next_batch = pretrain_iter.get_next()
+                while True:
+                    try:
+                        pretrain_X, pretrain_Y = self.sesh.run(next_batch)
+                        feed = {self.x_in: pretrain_X, self.y_in: pretrain_Y}
+                        fetches = [self.merged_summary, self.logits, self.pred,
+                                   self.cost, self.global_step, self.train_op]
+                        summary, logits, pred, cost, i, _ = self.sesh.run(fetches=fetches, feed_dict=feed)
+                        err_train += cost
+                        epoch_batch += 1
+                    except tf.errors.OutOfRangeError:
+                        i = self.global_step.eval(session=self.sesh)
+                        print('Epoch {} finished.'.format(epoch))
+                        print('Global step {}: average train error {}'.format(i, err_train / epoch_batch))
+                        break
+                self.epoch_pretrained = epoch
+            try:
+                self.pretrain_logger.flush()
+                self.pretrain_logger.close()
+            except AttributeError:  # not logging
+                print('Not logging')
+
+        except KeyboardInterrupt:
+            pass
+
+        now = datetime.now().isoformat()[11:]
+        print("------- Pre-training end: {} -------\n".format(now), flush=True)
+        print('Epochs trained: {}'.format(str(self.epoch_pretrained)))
+        i = self.global_step.eval(session=self.sesh)
+        print('Global steps: {}'.format(str(i)))
+
+        if save:
+            saver.save(self.sesh, outfile, global_step=None)
+            print('Pre-trained model saved to {}'.format(outfile))
+
     def inference(self, inf_iter, verbose=True):
         pred = []
         next_batch = inf_iter.get_next()
@@ -158,6 +212,7 @@ class MIL:
                     pred = self.inference(slide_iter, verbose=False)
                     pred_1 = pred[:, 1]
                     threshold = pred_1[pred_1.argsort()][-top_k]
+                    print('threshold: {}'.format(threshold))
                     slide_pred = tf.data.Dataset.from_tensor_slices((pred_1))
                     data_pred = tf.data.Dataset.zip((slide_data.get_data(), slide_pred))
 
@@ -177,20 +232,21 @@ class MIL:
                 train_iter = train_data.make_one_shot_iterator()
                 next_batch = train_iter.get_next()
 
+                err_train = 0
+                epoch_batch = 0
+
                 while True:
                     try:
                         ((train_X, train_Y), _) =self.sesh.run(next_batch)
                         feed = {self.x_in: train_X, self.y_in: train_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
                                    self.cost, self.global_step, self.train_op]
-                        err_train = 0
-                        epoch_batch = 0
                         summary, logits, pred, cost, i, _ = self.sesh.run(fetches=fetches, feed_dict=feed)
                         err_train += cost
                         epoch_batch += 1
                     except tf.errors.OutOfRangeError:
                         print('Epoch {} finished.'.format(epoch))
-                        print('Global step {}: average train error {}'.format(self.global_step, err_train / epoch_batch))
+                        print('Global step {}: average train error {}'.format(i, err_train / epoch_batch))
                         break
 
                 self.epoch_trained = epoch
@@ -212,5 +268,3 @@ class MIL:
         if save:
             saver.save(self.sesh, outfile, global_step=None)
             print('Trained model saved to {}'.format(outfile))
-
-        sys.exit(0)

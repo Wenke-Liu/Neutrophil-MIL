@@ -54,6 +54,11 @@ class DataSet(object):
         batched_dataset = parsed_dataset.batch(batch_size=self.batch_size, drop_remainder=False)
         return batched_dataset.make_one_shot_iterator()
 
+    def shuffled_iter(self):
+        parsed_dataset = self._dataset.map(self.decode_example)
+        batched_dataset = parsed_dataset.shuffle(buffer_size=512).batch(batch_size=self.batch_size, drop_remainder=False)
+        return batched_dataset.make_one_shot_iterator()
+
     def get_raw(self):
         return self._dataset
 

@@ -17,7 +17,7 @@ PNG_DIR = './png'
 DIC_DIR = '.'
 
 TILE_SIZE = 299
-OVERLAP = -5000
+OVERLAP = -10000
 STD = './colorstandard.png'
 
 ARCHITECTURE = 'I3'
@@ -63,6 +63,8 @@ def main(to_reload=None):
 
     else:
         m = MIL.MIL(mode=ARCHITECTURE, log_dir=LOG_DIR, meta_graph=None)
+        m.pre_train(pretrain_data_path=[TFR_DIR + '/' + f for f in slides_tfr],
+                    batch_size=BATCH_SIZE, n_epoch=N_EPOCH, out_dir=METAGRAPH_DIR)
         m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
                 save=True, out_dir=METAGRAPH_DIR)
         print('Trained!')
