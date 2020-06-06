@@ -204,7 +204,8 @@ class MIL:
                 """
                 Inference run: get top score tiles from each slide
                 """
-                train_subsets = []  # list of selected tiles, each element is a tf.Dataset with features: ((image, label), pred)
+                img_subsets = []
+                lab_subsets = []  # list of selected tiles, each element is a tf.Dataset with features: ((image, label),
                 for slide in slides:
                     # s_id = slide.split('.')[0]
                     slide_data = data_input.DataSet(inputs=[data_dir + '/' + slide], batch_size=batch_size)
@@ -212,7 +213,7 @@ class MIL:
                     pred = self.inference(slide_iter, verbose=False)
                     pred_1 = pred[:, 1]
                     threshold = pred_1[pred_1.argsort()][-top_k]
-                    print('threshold: {}'.format(threshold))
+                    print('Slide {}, threshold: {}'.format(slide, threshold))
                     slide_pred = tf.data.Dataset.from_tensor_slices((pred_1))
                     data_pred = tf.data.Dataset.zip((slide_data.get_data(), slide_pred))
 
@@ -221,12 +222,21 @@ class MIL:
                         return keep
 
                     filtered_data = data_pred.filter(filter_fn)
-                    train_subsets.extend([filtered_data])
+                    filtered_iter = filtered_data.make_one_shot_iterator()
+                    next_element = filtered_iter.get_next()
+                    try:
+                        ((img, lab), _) = self.sesh.run(next_element)
+                        print(img.shape)
+                        print(lab)
+                        img_subsets.append(img)
+                        lab_subsets.append(lab)
+                    except tf.errors.OutOfRangeError:
+                        pass
+                    print(len(img_subsets))
+                    print(len(lab_subsets))
 
-                train_data = train_subsets[0]
-                if len(train_subsets) > 1:
-                    for i in range(1, len(train_subsets)):
-                        train_data = train_data.concatenate(train_subsets[i])
+                img_subsets = np.asarray(img_subsets)
+                train_data = tf.data.Dataset.from_tensor_slices((img_subsets, lab_subsets))
                 train_data = train_data.shuffle(buffer_size=2000)
                 train_data = train_data.batch(batch_size, drop_remainder=False)
                 train_iter = train_data.make_one_shot_iterator()
@@ -237,7 +247,7 @@ class MIL:
 
                 while True:
                     try:
-                        ((train_X, train_Y), _) =self.sesh.run(next_batch)
+                        train_X, train_Y =self.sesh.run(next_batch)
                         feed = {self.x_in: train_X, self.y_in: train_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
                                    self.cost, self.global_step, self.train_op]
