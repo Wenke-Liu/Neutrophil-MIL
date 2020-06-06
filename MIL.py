@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import random
 import tensorflow as tf
 import numpy as np
 from datetime import datetime
@@ -188,7 +189,7 @@ class MIL:
         #print(pred)
         return pred
 
-    def train(self, data_dir, out_dir, slides, top_k=10, n_epoch=10, batch_size=128, save=True):
+    def train(self, data_dir, out_dir, slides, top_k=10, sample_rate=None, n_epoch=10, batch_size=128, save=True):
 
         if save:
             saver = tf.train.Saver(tf.global_variables(), max_to_keep=None)
@@ -205,11 +206,20 @@ class MIL:
                 Inference run: get top score tiles from each slide
                 """
                 img_subsets = []
-                lab_subsets = []  # list of selected tiles, each element is a tf.Dataset with features: ((image, label),
+                lab_subsets = []
                 for slide in slides:
                     # s_id = slide.split('.')[0]
                     slide_data = data_input.DataSet(inputs=[data_dir + '/' + slide], batch_size=batch_size)
-                    slide_iter = slide_data.batch_iter()
+
+                    def sample_fn(data):  # random sample from the whole slide, based on the sample_rate argument
+                        return random.random() < sample_rate
+                    if sample_rate:
+                        sample_data = slide_data.get_data().filter(sample_fn)
+                        sample_data = sample_data.batch(batch_size=batch_size, drop_remainder=False)
+                        slide_iter = sample_data.make_one_shot_iterator()
+                    else:
+                        slide_iter = slide_data.batch_iter()
+
                     pred = self.inference(slide_iter, verbose=False)
                     pred_1 = pred[:, 1]
                     threshold = pred_1[pred_1.argsort()][-top_k]
