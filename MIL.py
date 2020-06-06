@@ -1,7 +1,6 @@
 import os
 import re
 import sys
-import random
 import tensorflow as tf
 import numpy as np
 from datetime import datetime
@@ -70,7 +69,7 @@ class MIL:
         if save_graph_def:  # tensorboard
             try:
                 os.mkdir(log_dir + '/training')
-                #os.mkdir(log_dir + '/validation')
+                os.mkdir(log_dir + '/pretraining')
             except FileExistsError:
                 pass
             self.train_logger = tf.summary.FileWriter(log_dir + '/training', self.sesh.graph)
@@ -209,23 +208,28 @@ class MIL:
                 lab_subsets = []
                 for slide in slides:
                     # s_id = slide.split('.')[0]
-                    slide_data = data_input.DataSet(inputs=[data_dir + '/' + slide], batch_size=batch_size)
+                    slide_dataset = data_input.DataSet(inputs=[data_dir + '/' + slide], batch_size=batch_size)
 
-                    def sample_fn(data):  # random sample from the whole slide, based on the sample_rate argument
-                        return random.random() < sample_rate
+                    def sample_fn(data, rind):  # random sample from the whole slide, based on the sample_rate argument
+                        return rind < sample_rate
                     if sample_rate:
-                        sample_data = slide_data.get_data().filter(sample_fn)
-                        sample_data = sample_data.batch(batch_size=batch_size, drop_remainder=False)
-                        slide_iter = sample_data.make_one_shot_iterator()
+                        rand = np.random.uniform(0., 1., 200000)
+                        slide_data = slide_dataset.get_data()
+                        sample_data = tf.data.Dataset.zip((slide_data, rand))
+                        sample_data = sample_data.filter(sample_fn)
+                        slide_data = sample_data.map(lambda dat, rin: dat)
+                        slide_data = slide_data.batch(batch_size=batch_size, drop_remainder=False)
+                        slide_iter = slide_data.make_one_shot_iterator()
                     else:
-                        slide_iter = slide_data.batch_iter()
+                        slide_data = slide_dataset.get_data()
+                        slide_iter = slide_dataset.batch_iter()
 
                     pred = self.inference(slide_iter, verbose=False)
                     pred_1 = pred[:, 1]
                     threshold = pred_1[pred_1.argsort()][-top_k]
                     print('Slide {}, threshold: {}'.format(slide, threshold))
                     slide_pred = tf.data.Dataset.from_tensor_slices((pred_1))
-                    data_pred = tf.data.Dataset.zip((slide_data.get_data(), slide_pred))
+                    data_pred = tf.data.Dataset.zip((slide_data, slide_pred))
 
                     def filter_fn(data, pred_value):  # nested function to subset data based on current model inference
                         keep = pred_value > threshold
@@ -236,14 +240,12 @@ class MIL:
                     next_element = filtered_iter.get_next()
                     try:
                         ((img, lab), _) = self.sesh.run(next_element)
-                        print(img.shape)
-                        print(lab)
                         img_subsets.append(img)
                         lab_subsets.append(lab)
                     except tf.errors.OutOfRangeError:
                         pass
-                    print(len(img_subsets))
-                    print(len(lab_subsets))
+                    print('Filtered images: {}'.format(len(img_subsets)))
+                    print('Filtered labels:{}'.format(len(lab_subsets)))
 
                 img_subsets = np.asarray(img_subsets)
                 train_data = tf.data.Dataset.from_tensor_slices((img_subsets, lab_subsets))
