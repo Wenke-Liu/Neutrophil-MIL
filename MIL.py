@@ -5,6 +5,7 @@ import tensorflow as tf
 import numpy as np
 from datetime import datetime
 import data_input
+import utils
 import models
 
 """
@@ -139,6 +140,7 @@ class MIL:
                 while True:
                     try:
                         pretrain_X, pretrain_Y = self.sesh.run(next_batch)
+                        pretrain_X = utils.input_preprocessing(pretrain_X, model = self.architecture)
                         feed = {self.x_in: pretrain_X, self.y_in: pretrain_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
                                    self.cost, self.global_step, self.train_op]
@@ -204,6 +206,7 @@ class MIL:
                 """
                 Inference run: get top score tiles from each slide
                 """
+                print('----------epoch {}----------'.format(epoch))
                 img_subsets = []
                 lab_subsets = []
                 for slide in slides:
@@ -212,40 +215,49 @@ class MIL:
 
                     def sample_fn(data, rind):  # random sample from the whole slide, based on the sample_rate argument
                         return rind < sample_rate
+
                     if sample_rate:
-                        rand = np.random.uniform(0., 1., 200000)
+                        rand = tf.data.Dataset.from_tensor_slices(np.random.uniform(0., 1., 200000))
                         slide_data = slide_dataset.get_data()
                         sample_data = tf.data.Dataset.zip((slide_data, rand))
                         sample_data = sample_data.filter(sample_fn)
                         slide_data = sample_data.map(lambda dat, rin: dat)
-                        slide_data = slide_data.batch(batch_size=batch_size, drop_remainder=False)
-                        slide_iter = slide_data.make_one_shot_iterator()
+                        slide_data_batch = slide_data.batch(batch_size=batch_size, drop_remainder=False)
+                        slide_iter = slide_data_batch.make_one_shot_iterator()
                     else:
                         slide_data = slide_dataset.get_data()
                         slide_iter = slide_dataset.batch_iter()
 
                     pred = self.inference(slide_iter, verbose=False)
                     pred_1 = pred[:, 1]
+                    print('{}: {} tiles inferred from slide.'.format(slide,pred.shape[0]))
+                    print('Top {} probabilities: '.format(top_k))
+                    print(pred_1[pred_1.argsort()][-top_k:])
                     threshold = pred_1[pred_1.argsort()][-top_k]
-                    print('Slide {}, threshold: {}'.format(slide, threshold))
-                    slide_pred = tf.data.Dataset.from_tensor_slices((pred_1))
+                    print('Threshold: {}'.format(threshold))
+                    slide_pred = tf.data.Dataset.from_tensor_slices(pred_1)
                     data_pred = tf.data.Dataset.zip((slide_data, slide_pred))
 
                     def filter_fn(data, pred_value):  # nested function to subset data based on current model inference
-                        keep = pred_value > threshold
+                        keep = pred_value >= threshold
                         return keep
 
                     filtered_data = data_pred.filter(filter_fn)
                     filtered_iter = filtered_data.make_one_shot_iterator()
                     next_element = filtered_iter.get_next()
-                    try:
-                        ((img, lab), _) = self.sesh.run(next_element)
-                        img_subsets.append(img)
-                        lab_subsets.append(lab)
-                    except tf.errors.OutOfRangeError:
-                        pass
+                    top_count = 0
+                    while True:
+                        try:
+                            ((img, lab), _) = self.sesh.run(next_element)
+                            #print(img.shape)
+                            img_subsets.append(img)
+                            lab_subsets.append(lab)
+                            top_count += 1
+                        except tf.errors.OutOfRangeError:
+                            break
+                    #print('Top counts in  slide: {}'.format(top_count))
                     print('Filtered images: {}'.format(len(img_subsets)))
-                    print('Filtered labels:{}'.format(len(lab_subsets)))
+                    #print('Filtered labels:{}'.format(len(lab_subsets)))
 
                 img_subsets = np.asarray(img_subsets)
                 train_data = tf.data.Dataset.from_tensor_slices((img_subsets, lab_subsets))
@@ -260,6 +272,7 @@ class MIL:
                 while True:
                     try:
                         train_X, train_Y =self.sesh.run(next_batch)
+                        train_X = utils.input_preprocessing(train_X, model = self.architecture)
                         feed = {self.x_in: train_X, self.y_in: train_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
                                    self.cost, self.global_step, self.train_op]

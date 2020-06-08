@@ -5,8 +5,14 @@ from PIL import Image
 from openslide import OpenSlide
 
 
+def input_preprocessing(inputs, model='I3'):
+    inputs  = inputs.astype(np.float32)/ 255
+    inputs  = inputs - 0.5 
+    inputs  = inputs  * 2
+    return inputs
+
 def slide_prediction(pos_score, cutoff=0.5):
-    mean_pos_score = np.mean(pos_score)
+    mean_pos_score = np.mean(pos_score).asscalar()
     pos_ct = sum(s > cutoff for s in pos_score)
     print('Mean positive score for the slide: {}'.format(str(round(mean_pos_score, 5))))
     print('{} positive tiles in total of {}.'.format(str(pos_ct), str(len(pos_score))))

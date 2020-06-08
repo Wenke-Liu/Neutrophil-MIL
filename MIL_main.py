@@ -8,26 +8,28 @@ import staintools
 import utils
 import data_prep
 
-MODE = 'test'  # or 'test' or 'retrain'
-LOG_DIR = './test/log'
-METAGRAPH_DIR = './test/model'
-TFR_DIR = './tfr_test'
+
+LOG_DIR = './200608/log'
+METAGRAPH_DIR = './200608/model'
+TFR_DIR = './tfr/trn'
 SCN_DIR = '.'
 PNG_DIR = './png'
 DIC_DIR = '.'
+PRE_DIR = './tile_tfr/trn'
 
 TILE_SIZE = 299
 OVERLAP = -10000
 STD = './colorstandard.png'
 
 ARCHITECTURE = 'I3'
-N_EPOCH = 2
-BATCH_SIZE = 1
+N_EPOCH = 50
+BATCH_SIZE = 64
 TOP_K = 2
 
 
 def main(to_reload=None):
     slides_tfr = os.listdir(TFR_DIR)
+    pretrain_tfr = os.listdir(PRE_DIR)
     slides_scn = os.listdir(SCN_DIR)
     slides_scn = list(filter(lambda x: (x[-4:] == '.scn'), slides_scn))
 
@@ -60,12 +62,16 @@ def main(to_reload=None):
                 utils.plot_example(s_id=s_id, imglist=imglist, pos_score=pred[:, 1],
                                    tile_dic=imlocpd, out_dir=out_dir, cutoff=0.5)
 
+        else:  # 'retrain'
+            print('Retraining begin...')
+            m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, sample_rate=0.1, n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
+                    save=True, out_dir=METAGRAPH_DIR)
 
     else:
         m = MIL.MIL(mode=ARCHITECTURE, log_dir=LOG_DIR, meta_graph=None)
-        m.pre_train(pretrain_data_path=[TFR_DIR + '/' + f for f in slides_tfr],
-                    batch_size=BATCH_SIZE, n_epoch=N_EPOCH, out_dir=METAGRAPH_DIR)
-        m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
+        m.pre_train(pretrain_data_path=[PRE_DIR + '/' + f for f in pretrain_tfr],
+                    batch_size=BATCH_SIZE, n_epoch=15, out_dir=METAGRAPH_DIR, save=True)
+        m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, sample_rate=0.1, n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
                 save=True, out_dir=METAGRAPH_DIR)
         print('Trained!')
 
@@ -85,3 +91,5 @@ if __name__ == "__main__":
         main(to_reload=TO_RELOAD)
     except IndexError:
         main()
+
+    sys.exit(0)

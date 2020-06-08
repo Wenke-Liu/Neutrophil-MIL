@@ -30,7 +30,7 @@ class DataSet(object):
 
         parsed_example = _parse_function(example)
         dim = tf.decode_raw(parsed_example['dim'], tf.int64)
-        image = tf.decode_raw(parsed_example['image'], tf.float32)
+        image = tf.decode_raw(parsed_example['image'],tf.uint8)
         label = tf.cast(parsed_example['label'], tf.int32)
         image = tf.reshape(image, dim)
 
