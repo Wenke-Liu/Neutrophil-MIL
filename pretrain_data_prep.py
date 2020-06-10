@@ -3,25 +3,10 @@ import numpy as np
 import pandas as pd
 import cv2
 import tensorflow as tf
-import argparse
 
-parser = argparse.ArgumentParser(description='Neutrophil MIL tile pre-train data prep')
-parser.add_argument('--lab_lst', type=str, default='.', help='Label list.')
-parser.add_argument('--img_dir', type=str, default=None, help='Directory of images png files.')
-parser.add_argument('--out_f', type=str, default=None, help='Output file.')
-
-LAB_LST = './tr_samples.csv'
+LAB_LST = './te_sample.csv'
 IMG_DIR = '../sampled_tiles'
-OUT_FILE = './tr_sample.tfrecords'
-
-args = parser.parse_args()
-for arg in vars(args):
-    print(arg, getattr(args, arg))
-
-LAB_LST = args.lab_lst
-IMG_DIR = args.img_dir
-OUT_FILE = args.out_f
-
+OUT_FILE = './tile_tfr/tst/te_sample.tfrecords'
 
 
 def _bytes_feature(value):

@@ -1,3 +1,5 @@
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
 import tensorflow as tf
 import numpy as np
@@ -53,7 +55,7 @@ def v_slide(slp, s_id, n_y, x, y, tile_size, step_size, out_dir, x0, std=np.asar
             if out_dir:
                 img.save(out_dir + '/' + tile_name)
         # append image data and descriptions to list
-            imlist.append(np.asarray(img)[:, :, :3].astype(np.float32))
+            imlist.append(np.asarray(img)[:, :, :3].astype(np.uint8))
             imloc.append([s_id, str(x0).zfill(3), str(y0).zfill(3),
                           str(target_x).zfill(5), str(target_y).zfill(5), tile_name])
 
@@ -89,8 +91,9 @@ def tile(scn_file, s_id, out_dir, std_img, path_to_slide="../Neutrophil/", tile_
 
     x0 = 0
     # create multiprocessing pool
-    print(mp.cpu_count())
-    pool = mp.Pool(processes=8)
+    print('Number of cores available:{}'.format(mp.cpu_count()))
+    pool = mp.Pool(processes=mp.cpu_count()-2)
+    print('Number of cores used: {}'.format(mp.cpu_count()-2))
     tasks = []
     while x0 < n_x:
         task = tuple((slp, s_id, n_y, x, y, tile_size, step_size, out_dir, x0, std_img))
@@ -103,8 +106,8 @@ def tile(scn_file, s_id, out_dir, std_img, path_to_slide="../Neutrophil/", tile_
 
     pool.close()
     pool.join()
-    print(list(map(len, tempdict)))
-    print(list(map(len, tempimglist)))
+    #print(list(map(len, tempdict)))
+    #print(list(map(len, tempimglist)))
 
     imloc = []
     list(map(imloc.extend, tempdict))
@@ -150,7 +153,7 @@ def _int64_array_feature(value):
 
 
 def main():  # run as main
-
+    import warnings
     import argparse
     parser = argparse.ArgumentParser(description='Neutrophil MIL data prep')
     parser.add_argument('--scn_dir', type=str, default='.', help='directory of scn files.')
