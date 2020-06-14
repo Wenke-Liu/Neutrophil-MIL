@@ -11,13 +11,7 @@ class DataSet(object):
 
     def __init__(self, inputs, batch_size=128):
         self.batch_size = batch_size
-        if all(isinstance(elem, str) for elem in inputs):  # if all inputs are filename strings
-            self._dataset = tf.data.TFRecordDataset(filenames=inputs)
-        else:  # if inputs are TFRecords datasets
-            self._dataset = inputs[0]
-            if len(inputs)>1:
-                for i in range(1,len(inputs)):
-                    self._dataset = self._dataset.concatenate(inputs[i])
+        self._dataset = tf.data.TFRecordDataset(filenames=inputs)
 
     def decode_example(self, example):
         feature_description = {'dim': tf.FixedLenFeature([], tf.string),
@@ -47,17 +41,17 @@ class DataSet(object):
 
     def data_iter(self):
         parsed_dataset = self._dataset.map(self.decode_example)
-        return parsed_dataset.make_one_shot_iterator()
+        return parsed_dataset.make_initializable_iterator()
 
     def batch_iter(self):
         parsed_dataset = self._dataset.map(self.decode_example)
         batched_dataset = parsed_dataset.batch(batch_size=self.batch_size, drop_remainder=False)
-        return batched_dataset.make_one_shot_iterator()
+        return batched_dataset.make_initializable_iterator()
 
     def shuffled_iter(self):
         parsed_dataset = self._dataset.map(self.decode_example)
         batched_dataset = parsed_dataset.shuffle(buffer_size=512).batch(batch_size=self.batch_size, drop_remainder=False)
-        return batched_dataset.make_one_shot_iterator()
+        return batched_dataset.make_initializable_iterator()
 
     def get_raw(self):
         return self._dataset
