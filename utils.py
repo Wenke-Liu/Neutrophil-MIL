@@ -4,10 +4,11 @@ import cv2
 from PIL import Image
 from openslide import OpenSlide
 
+
 def input_preprocessing(inputs, model='I3'):
-    inputs  = inputs.astype(np.float32)/ 255
-    inputs  = inputs - 0.5 
-    inputs  = inputs  * 2
+    inputs = inputs / 255
+    inputs = inputs - 0.5
+    inputs = inputs * 2
     return inputs
 
 def slide_prediction(pos_score, cutoff=0.5):
