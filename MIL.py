@@ -152,10 +152,10 @@ class MIL:
 
     def inference(self, inf_iter, verbose=True):
         pred = []
-        next_batch = inf_iter.get_next()
+        next_batch_to_infer = inf_iter.get_next()
         while True:
             try:
-                X, _ = self.sesh.run(next_batch)
+                X, _ = self.sesh.run(next_batch_to_infer)
                 feed = {self.x_in: X, self.training_status: False}
                 batch_pred, i = self.sesh.run(feed_dict=feed, fetches=[self.pred, self.global_step])
                 pred.extend(batch_pred)
@@ -179,18 +179,28 @@ class MIL:
                 str(self.datetime), str(self.architecture),
                 str(self.learning_rate), str(self.dropout)))
 
-        now = datetime.now().isoformat()[11:]
         valid_costs = []
+        pretrain_iter = pretrain_data.shuffled_iter()
+        next_pretrn_batch = pretrain_iter.get_next()
+
+        if valid_data_path:
+            preval_data = data_input.DataSet(inputs=valid_data_path, batch_size=batch_size)
+            preval_iter = preval_data.shuffled_iter()
+            next_preval_batch = preval_iter.get_next()
+
+        now = datetime.now().strftime(r"%y-%m-%d %H:%M:%S")
+
         print("------- Pre-training begin: {} -------\n".format(now))
         try:
             for epoch in range(n_epoch):
-                pretrain_iter = pretrain_data.shuffled_iter()
+
                 err_train = 0
                 epoch_batch = 0
-                next_batch = pretrain_iter.get_next()
+                self.sesh.run(pretrain_iter.initializer)
+
                 while True:
                     try:
-                        pretrain_X, pretrain_Y = self.sesh.run(next_batch)
+                        pretrain_X, pretrain_Y = self.sesh.run(next_pretrn_batch)
                         pretrain_X = utils.input_preprocessing(pretrain_X, model=self.architecture)
                         feed = {self.x_in: pretrain_X, self.y_in: pretrain_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
@@ -204,16 +214,15 @@ class MIL:
                         print('Epoch {} finished.'.format(epoch))
                         print('Global step {}: average train error {}'.format(i, err_train / epoch_batch))
                         break
-                self.epoch_pretrained = epoch
+                    self.epoch_pretrained = epoch
+
                 if valid_data_path:
-                    valid_data = data_input.DataSet(inputs=valid_data_path, batch_size=batch_size)
-                    valid_iter = valid_data.shuffled_iter()
-                    next_batch = valid_iter.get_next()
-                    valid_X, valid_Y = self.sesh.run(next_batch)
+                    self.sesh.run(preval_iter.initializer)
+                    valid_X, valid_Y = self.sesh.run(next_preval_batch)
                     valid_X = utils.input_preprocessing(valid_X, model=self.architecture)
                     feed = {self.x_in: valid_X, self.y_in: valid_Y, self.training_status: False}
                     fetches = [self.merged_summary, self.pred,
-                               self.cost, self.global_step]
+                                   self.cost, self.global_step]
                     summary, pred, cost, i = self.sesh.run(fetches=fetches, feed_dict=feed)
                     self.validation_logger.add_summary(summary, i)
                     print('Tile pre-training epoch {} validation cost: {}'.format(self.epoch_pretrained, cost))
@@ -237,7 +246,7 @@ class MIL:
         except KeyboardInterrupt:
             pass
 
-        now = datetime.now().isoformat()[11:]
+        now = datetime.now().strftime(r"%y-%m-%d %H:%M:%S")
         print("------- Pre-training end: {} -------\n".format(now), flush=True)
         print('Epochs trained: {}'.format(str(self.epoch_pretrained)))
         i = self.global_step.eval(session=self.sesh)
@@ -246,7 +255,6 @@ class MIL:
         if save:
             saver.save(self.sesh, outfile, global_step=None)
             print('Pre-trained model saved to {}'.format(outfile))
-
 
     def train(self, data_dir, out_dir, slides, top_k=10,
               valid_data_path=None, sample_rate=None, n_epoch=10, batch_size=128, save=True):
@@ -257,82 +265,99 @@ class MIL:
                 str(self.datetime), str(self.architecture),
                 str(self.learning_rate), str(self.dropout)))
 
-        now = datetime.now().isoformat()[11:]
+        now = datetime.now().strftime(r"%y-%m-%d %H:%M:%S")
         valid_costs = []
         print("------- Training begin: {} -------\n".format(now))
+        slide_fn = tf.placeholder(tf.string, shape=None)
+        slide_dataset = data_input.DataSet(inputs=slide_fn, batch_size=batch_size)
+        slide_tfr_iter = slide_dataset.shuffled_iter()
+        next_tfr_batch = slide_tfr_iter.get_next()
+
+        sample_img_ph = tf.placeholder(tf.float32)
+        sample_img_ph = utils.input_preprocessing(sample_img_ph)
+        sample_lab_ph = tf.placeholder(tf.int64)
+        sample_ds = tf.data.Dataset.from_tensor_slices((sample_img_ph, sample_lab_ph))
+        sample_ds = sample_ds.batch(batch_size=batch_size)
+        sample_iter = sample_ds.make_initializable_iterator()
+
+        trn_img_ph = tf.placeholder(tf.float32)
+        trn_lab_ph = tf.placeholder(tf.int64)
+        trn_ds = tf.data.Dataset.from_tensor_slices((trn_img_ph, trn_lab_ph))
+        trn_ds = trn_ds.shuffle(buffer_size=2000).batch(batch_size=batch_size)
+        trn_iter = trn_ds.make_initializable_iterator()
+        next_trn_batch = trn_iter.get_next()
+
+        if valid_data_path:
+            valid_data = data_input.DataSet(inputs=valid_data_path, batch_size=batch_size)
+            valid_iter = valid_data.shuffled_iter()
+            next_val_batch = valid_iter.get_next()
 
         try:
             for epoch in range(n_epoch):
                 """
                 Inference run: get top score tiles from each slide
                 """
-                now = datetime.now().isoformat()[11:]
+                now = datetime.now().strftime(r"%y-%m-%d %H:%M:%S")
                 print('----------epoch {}: {}----------'.format(epoch, now))
-                img_subsets = []
-                lab_subsets = []
+                trn_img_subsets = []
+                trn_lab_subsets = []
+
                 for slide in slides:
                     # s_id = slide.split('.')[0]
-                    slide_dataset = data_input.DataSet(inputs=[data_dir + '/' + slide], batch_size=batch_size)
+                    sample_img = []
+                    sample_lab = []
+                    slide_path = data_dir + '/' + slide
+                    self.sesh.run(slide_tfr_iter.initializer,
+                                  feed_dict={slide_fn: slide_path})
 
-                    def sample_fn(data, rind):  # random sample from the whole slide, based on the sample_rate argument
-                        return rind < sample_rate
-
-                    if sample_rate:
-                        rand = tf.data.Dataset.from_tensor_slices(np.random.uniform(0., 1., 200000))
-                        slide_data = slide_dataset.get_data()
-                        sample_data = tf.data.Dataset.zip((slide_data, rand))
-                        sample_data = sample_data.filter(sample_fn)
-                        slide_data = sample_data.map(lambda dat, rin: dat)
-                        slide_data_batch = slide_data.batch(batch_size=batch_size, drop_remainder=False)
-                        slide_iter = slide_data_batch.make_one_shot_iterator()
-                    else:
-                        slide_data = slide_dataset.get_data()
-                        slide_iter = slide_dataset.batch_iter()
-
-                    pred = self.inference(slide_iter, verbose=False)
-                    pred_1 = pred[:, 1]
-                    print('{}: {} tiles inferred from slide.'.format(slide,pred.shape[0]))
-                    print('Top {} probabilities: '.format(top_k))
-                    print(pred_1[pred_1.argsort()][-top_k:])
-                    threshold = pred_1[pred_1.argsort()][-top_k]
-                    print('Threshold: {}'.format(threshold))
-                    slide_pred = tf.data.Dataset.from_tensor_slices(pred_1)
-                    data_pred = tf.data.Dataset.zip((slide_data, slide_pred))
-
-                    def filter_fn(data, pred_value):  # nested function to subset data based on current model inference
-                        keep = pred_value >= threshold
-                        return keep
-
-                    filtered_data = data_pred.filter(filter_fn)
-                    filtered_iter = filtered_data.make_one_shot_iterator()
-                    next_element = filtered_iter.get_next()
-                    top_count = 0
                     while True:
                         try:
-                            ((img, lab), _) = self.sesh.run(next_element)
-                            #print(img.shape)
-                            img_subsets.append(img)
-                            lab_subsets.append(lab)
-                            top_count += 1
+                            img, lab = self.sesh.run(next_tfr_batch)
+
+                            if not sample_rate:
+                                sample_img.append(img)
+                                sample_lab.append(lab)
+                            elif np.random.random() <= sample_rate:
+                                sample_img.append(img)
+                                sample_lab.append(lab)
+                            else:
+                                pass
+
                         except tf.errors.OutOfRangeError:
                             break
-                    #print('Top counts in  slide: {}'.format(top_count))
-                    print('Filtered images: {}'.format(len(img_subsets)))
+                    sample_img = np.concatenate(sample_img, axis=0)
+                    sample_lab = np.concatenate(sample_lab, axis=0)
+
+                    self.sesh.run(sample_iter.initializer,
+                                  feed_dict={sample_img_ph: sample_img, sample_lab_ph: sample_lab})
+
+                    pred = self.inference(sample_iter, verbose=False)
+                    pred_1 = pred[:, 1]
+                    print('{}: {} tiles inferred from slide.'.format(slide, pred.shape[0]))
+                    print('Top {} probabilities: '.format(top_k))
+                    slide_ind = pred_1.argsort()[-top_k:]
+                    print(pred_1[slide_ind])
+                    threshold = pred_1[slide_ind][0]
+                    print('Threshold: {}'.format(threshold))
+
+                    for ind in slide_ind:
+                        trn_img_subsets.append(sample_img[ind])
+                        trn_lab_subsets.append(sample_lab[ind])
+
+                    print('Filtered images: {}'.format(len(trn_img_subsets)))
                     #print('Filtered labels:{}'.format(len(lab_subsets)))
 
-                img_subsets = np.asarray(img_subsets)
-                train_data = tf.data.Dataset.from_tensor_slices((img_subsets, lab_subsets))
-                train_data = train_data.shuffle(buffer_size=2000)
-                train_data = train_data.batch(batch_size, drop_remainder=False)
-                train_iter = train_data.make_one_shot_iterator()
-                next_batch = train_iter.get_next()
+                trn_img_subsets = np.asarray(trn_img_subsets)
+                trn_lab_subsets = np.asarray(trn_lab_subsets)
+                self.sesh.run(trn_iter.initializer, feed_dict={trn_img_ph: trn_img_subsets,
+                                                               trn_lab_ph: trn_lab_subsets})
 
                 err_train = 0
                 epoch_batch = 0
 
                 while True:
                     try:
-                        train_X, train_Y =self.sesh.run(next_batch)
+                        train_X, train_Y =self.sesh.run(next_trn_batch)
                         train_X = utils.input_preprocessing(train_X, model = self.architecture)
                         feed = {self.x_in: train_X, self.y_in: train_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
@@ -346,11 +371,10 @@ class MIL:
                         break
 
                 self.epoch_trained = epoch
+
                 if valid_data_path:
-                    valid_data = data_input.DataSet(inputs=valid_data_path, batch_size=batch_size)
-                    valid_iter = valid_data.shuffled_iter()
-                    next_batch = valid_iter.get_next()
-                    valid_X, valid_Y = self.sesh.run(next_batch)
+                    self.sesh.run(valid_iter.initializer)
+                    valid_X, valid_Y = self.sesh.run(next_val_batch)
                     valid_X = utils.input_preprocessing(valid_X, model=self.architecture)
                     feed = {self.x_in: valid_X, self.y_in: valid_Y, self.training_status: False}
                     fetches = [self.merged_summary, self.pred,
@@ -371,7 +395,7 @@ class MIL:
         except KeyboardInterrupt:
             pass
 
-        now = datetime.now().isoformat()[11:]
+        now = datetime.now().strftime(r"%y-%m-%d %H:%M:%S")
         print("------- Training end: {} -------\n".format(now), flush=True)
         print('Epochs trained: {}'.format(str(self.epoch_trained)))
         i = self.global_step.eval(session = self.sesh)
