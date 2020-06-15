@@ -52,7 +52,7 @@ class MIL:
             for handle in handles:
                 tf.add_to_collection(MIL.RESTORE_KEY, handle)
             self.sesh.run(tf.global_variables_initializer())
-            self._load_imagenet()
+            #self._load_imagenet()
 
         else:  # restore saved model
             model_datetime, model_name = re.split("_MIL_|_preMIL_", os.path.basename(meta_graph))
@@ -150,14 +150,19 @@ class MIL:
         init_fn(self.sesh)
         print('Load imagenet pretrained weights.')
 
-    def inference(self, inf_batch, verbose=True):
+    def inference(self, img_to_infer):
+        img_to_infer = utils.input_preprocessing(img_to_infer, model=self.architecture)
+        feed = {self.x_in: img_to_infer, self.training_status: False}
+        pred, i = self.sesh.run(feed_dict=feed, fetches=[self.pred, self.global_step])
+        return pred
+
+    def iter_inference(self, inf_batch, verbose=True):
         pred = []
         while True:
             try:
                 X, _ = self.sesh.run(inf_batch)
                 X = utils.input_preprocessing(X, model=self.architecture)
-                feed = {self.x_in: X, self.training_status: False}
-                batch_pred, i = self.sesh.run(feed_dict=feed, fetches=[self.pred, self.global_step])
+                batch_pred = self.inference(X)
                 pred.extend(batch_pred)
 
             except tf.errors.OutOfRangeError:
@@ -165,7 +170,7 @@ class MIL:
                     print('end of iteration. {} predictions'.format(str(len(pred))))
                 break
         pred = np.asarray(pred)  # pred is an array of n_predictions by n_class
-        #print(pred)
+        # print(pred)
         return pred
 
     def pre_train(self, pretrain_data_path, out_dir, valid_data_path=None, n_epoch=10, batch_size=128, save=True):
@@ -233,7 +238,6 @@ class MIL:
                         print('Validation cost reached plateau. Pre-training stopped.')
                         break
 
-
             try:
                 self.pretrain_logger.flush()
                 self.pretrain_logger.close()
@@ -266,19 +270,32 @@ class MIL:
                 str(self.learning_rate), str(self.dropout)))
 
         now = datetime.now().strftime(r"%y-%m-%d %H:%M:%S")
-        valid_costs = []
+
         print("------- Training begin: {} -------\n".format(now))
+
         slide_fn = tf.placeholder(tf.string, shape=None)
         slide_dataset = data_input.DataSet(inputs=slide_fn, batch_size=64)
-        slide_tfr_iter = slide_dataset.shuffled_iter()
-        next_tfr_batch = slide_tfr_iter.get_next()
+        rand_ph = tf.placeholder(tf.float32, shape=None)
 
-        sample_img_ph = tf.placeholder(tf.uint8)
-        sample_lab_ph = tf.placeholder(tf.int64)
-        sample_ds = tf.data.Dataset.from_tensor_slices((sample_img_ph, sample_lab_ph))
-        sample_ds = sample_ds.batch(batch_size=64)
-        sample_iter = sample_ds.make_initializable_iterator()
-        next_batch_to_infer = sample_iter.get_next()
+        def sample_slide(ds, rand, rate):  # random sample from the whole slide, based on the sample_rate argument
+            if not sample_rate:
+                iter = ds.data_iter()
+
+            else:
+                def sample_fn(data, rind):  # random sample from the whole slide, based on the sample_rate argument
+                    return rind < rate
+
+                dat = ds.get_data()
+                rds = tf.data.Dataset.from_tensor_slices(rand)
+                dat_sample = tf.data.Dataset.zip((dat, rds))
+                dat_sample = dat_sample.filter(sample_fn)
+                dat_sample = dat_sample.map(lambda dat_, rds_: dat_)
+                iter = dat_sample.batch(batch_size=batch_size, drop_remainder=False).make_initializable_iterator()
+
+            return iter
+
+        slide_tfr_iter = sample_slide(slide_dataset, rand_ph, sample_rate)
+        next_tfr_batch = slide_tfr_iter.get_next()
 
         trn_img_ph = tf.placeholder(tf.uint8)
         trn_lab_ph = tf.placeholder(tf.int64)
@@ -304,45 +321,41 @@ class MIL:
 
                 for slide in slides:
                     # s_id = slide.split('.')[0]
-                    sample_img = []
-                    sample_lab = []
+                    slide_prob = []
+                    slide_img = []
+                    slide_lab = []
+                    slide_counter = 0
                     slide_path = data_dir + '/' + slide
+
                     self.sesh.run(slide_tfr_iter.initializer,
-                                  feed_dict={slide_fn: slide_path})
+                                  feed_dict={slide_fn: slide_path, rand_ph: np.random.uniform(0., 1., 200000)})
 
                     while True:
                         try:
-                            img, lab = self.sesh.run(next_tfr_batch)
-
-                            if not sample_rate:
-                                sample_img.append(img)
-                                sample_lab.append(lab)
-                            elif np.random.random() <= sample_rate:
-                                sample_img.append(img)
-                                sample_lab.append(lab)
-                            else:
-                                pass
+                            imgs, labs = self.sesh.run(next_tfr_batch)
+                            batch_pred = self.inference(imgs)[:, 1]
+                            slide_counter += imgs.shape[0]
+                            batch_top_ind = batch_pred.argsort()[-1]  # top ind in descending order
+                            slide_prob.append(batch_pred[batch_top_ind])
+                            slide_img.append(imgs[batch_top_ind])
+                            slide_lab.append(labs[batch_top_ind])
 
                         except tf.errors.OutOfRangeError:
                             break
-                    sample_img = np.concatenate(sample_img, axis=0)
-                    sample_lab = np.concatenate(sample_lab, axis=0)
 
-                    self.sesh.run(sample_iter.initializer,
-                                  feed_dict={sample_img_ph: sample_img, sample_lab_ph: sample_lab})
+                        slide_prob_ind = np.asarray(slide_prob).argsort()[:-2]
+                        for ind in sorted(slide_prob_ind, reverse=True):
+                            del slide_prob[ind]
+                            del slide_img[ind]
+                            del slide_lab[ind]
 
-                    pred = self.inference(next_batch_to_infer, verbose=False)
-                    pred_1 = pred[:, 1]
-                    print('{}: {} tiles inferred from slide.'.format(slide, pred.shape[0]))
+                    print('{}: {} tiles inferred from slide.'.format(slide, slide_counter))
                     print('Top {} probabilities: '.format(top_k))
-                    slide_ind = pred_1.argsort()[-top_k:]
-                    print(pred_1[slide_ind])
-                    threshold = pred_1[slide_ind][0]
-                    print('Threshold: {}'.format(threshold))
+                    print(slide_prob)
 
-                    for ind in slide_ind:
-                        trn_img_subsets.append(sample_img[ind])
-                        trn_lab_subsets.append(sample_lab[ind])
+                    for i in range(len(slide_prob)):
+                        trn_img_subsets.append(slide_img[i])
+                        trn_lab_subsets.append(slide_lab[i])
 
                     print('Filtered images: {}'.format(len(trn_img_subsets)))
                     #print('Filtered labels:{}'.format(len(lab_subsets)))
