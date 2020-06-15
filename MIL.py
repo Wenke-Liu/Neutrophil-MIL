@@ -150,12 +150,12 @@ class MIL:
         init_fn(self.sesh)
         print('Load imagenet pretrained weights.')
 
-    def inference(self, inf_iter, verbose=True):
+    def inference(self, inf_batch, verbose=True):
         pred = []
-        next_batch_to_infer = inf_iter.get_next()
         while True:
             try:
-                X, _ = self.sesh.run(next_batch_to_infer)
+                X, _ = self.sesh.run(inf_batch)
+                X = utils.input_preprocessing(X, model=self.architecture)
                 feed = {self.x_in: X, self.training_status: False}
                 batch_pred, i = self.sesh.run(feed_dict=feed, fetches=[self.pred, self.global_step])
                 pred.extend(batch_pred)
@@ -269,18 +269,18 @@ class MIL:
         valid_costs = []
         print("------- Training begin: {} -------\n".format(now))
         slide_fn = tf.placeholder(tf.string, shape=None)
-        slide_dataset = data_input.DataSet(inputs=slide_fn, batch_size=batch_size)
+        slide_dataset = data_input.DataSet(inputs=slide_fn, batch_size=64)
         slide_tfr_iter = slide_dataset.shuffled_iter()
         next_tfr_batch = slide_tfr_iter.get_next()
 
-        sample_img_ph = tf.placeholder(tf.float32)
-        sample_img_ph = utils.input_preprocessing(sample_img_ph)
+        sample_img_ph = tf.placeholder(tf.uint8)
         sample_lab_ph = tf.placeholder(tf.int64)
         sample_ds = tf.data.Dataset.from_tensor_slices((sample_img_ph, sample_lab_ph))
-        sample_ds = sample_ds.batch(batch_size=batch_size)
+        sample_ds = sample_ds.batch(batch_size=64)
         sample_iter = sample_ds.make_initializable_iterator()
+        next_batch_to_infer = sample_iter.get_next()
 
-        trn_img_ph = tf.placeholder(tf.float32)
+        trn_img_ph = tf.placeholder(tf.uint8)
         trn_lab_ph = tf.placeholder(tf.int64)
         trn_ds = tf.data.Dataset.from_tensor_slices((trn_img_ph, trn_lab_ph))
         trn_ds = trn_ds.shuffle(buffer_size=2000).batch(batch_size=batch_size)
@@ -288,7 +288,7 @@ class MIL:
         next_trn_batch = trn_iter.get_next()
 
         if valid_data_path:
-            valid_data = data_input.DataSet(inputs=valid_data_path, batch_size=batch_size)
+            valid_data = data_input.DataSet(inputs=valid_data_path, batch_size=64)
             valid_iter = valid_data.shuffled_iter()
             next_val_batch = valid_iter.get_next()
 
@@ -331,7 +331,7 @@ class MIL:
                     self.sesh.run(sample_iter.initializer,
                                   feed_dict={sample_img_ph: sample_img, sample_lab_ph: sample_lab})
 
-                    pred = self.inference(sample_iter, verbose=False)
+                    pred = self.inference(next_batch_to_infer, verbose=False)
                     pred_1 = pred[:, 1]
                     print('{}: {} tiles inferred from slide.'.format(slide, pred.shape[0]))
                     print('Top {} probabilities: '.format(top_k))
@@ -382,6 +382,9 @@ class MIL:
                     summary, pred, cost, i = self.sesh.run(fetches=fetches, feed_dict=feed)
                     self.validation_logger.add_summary(summary, i)
                     print('MIL training epoch {} validation cost: {}'.format(self.epoch_trained, cost))
+                if save:
+                    saver.save(self.sesh, outfile, global_step=None)
+                    print('Trained model saved to {}'.format(outfile))
 
             try:
                 self.train_logger.flush()
