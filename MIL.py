@@ -52,7 +52,7 @@ class MIL:
             for handle in handles:
                 tf.add_to_collection(MIL.RESTORE_KEY, handle)
             self.sesh.run(tf.global_variables_initializer())
-            #self._load_imagenet()
+            self._load_imagenet()
 
         else:  # restore saved model
             model_datetime, model_name = re.split("_MIL_|_preMIL_", os.path.basename(meta_graph))
@@ -335,10 +335,15 @@ class MIL:
                             imgs, labs = self.sesh.run(next_tfr_batch)
                             batch_pred = self.inference(imgs)[:, 1]
                             slide_counter += imgs.shape[0]
-                            batch_top_ind = batch_pred.argsort()[-1]  # top ind in descending order
-                            slide_prob.append(batch_pred[batch_top_ind])
-                            slide_img.append(imgs[batch_top_ind])
-                            slide_lab.append(labs[batch_top_ind])
+                            batch_top_ind = batch_pred.argsort()[-1]  # index of largest probability
+                            batch_top = batch_pred[batch_top_ind]
+
+                            if batch_top >= np.sort(np.array(slide_prob))[-2]:
+                                slide_prob.append(batch_pred[batch_top_ind])
+                                slide_img.append(imgs[batch_top_ind])
+                                slide_lab.append(labs[batch_top_ind])
+                            else:
+                                pass
 
                         except tf.errors.OutOfRangeError:
                             break
