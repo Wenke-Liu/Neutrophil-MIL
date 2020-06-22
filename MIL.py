@@ -160,15 +160,17 @@ class MIL:
         pred = []
         while True:
             try:
-                X, _ = self.sesh.run(inf_batch)
+                X = self.sesh.run(inf_batch)
                 X = utils.input_preprocessing(X, model=self.architecture)
                 batch_pred = self.inference(X)
-                pred.extend(batch_pred)
+                pred.append(batch_pred)
 
             except tf.errors.OutOfRangeError:
                 if verbose:
                     print('end of iteration. {} predictions'.format(str(len(pred))))
                 break
+
+        pred = np.concatenate(pred, axis=0)
         pred = np.asarray(pred)  # pred is an array of n_predictions by n_class
         # print(pred)
         return pred
@@ -376,7 +378,7 @@ class MIL:
                 while True:
                     try:
                         train_X, train_Y =self.sesh.run(next_trn_batch)
-                        train_X = utils.input_preprocessing(train_X, model = self.architecture)
+                        train_X = utils.input_preprocessing(train_X, model=self.architecture)
                         feed = {self.x_in: train_X, self.y_in: train_Y}
                         fetches = [self.merged_summary, self.logits, self.pred,
                                    self.cost, self.global_step, self.train_op]
