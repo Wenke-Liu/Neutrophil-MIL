@@ -28,57 +28,25 @@ BATCH_SIZE = 2
 TOP_K = 2
 
 
-def main(to_reload=None):
+def main():
     slides_tfr = os.listdir(TFR_DIR)
     pretrain_tfr = os.listdir(PRE_DIR)
     slides_scn = os.listdir(SCN_DIR)
     slides_scn = list(filter(lambda x: (x[-4:] == '.scn'), slides_scn))
 
-    if to_reload:
-        m = MIL.MIL(mode=ARCHITECTURE, log_dir=LOG_DIR, meta_graph=to_reload)
-        print("Loaded!", flush=True)
 
-        if MODE == 'test':
-            std = staintools.read_image(STD)
-            std = staintools.LuminosityStandardizer.standardize(std)
-            try:
-                os.mkdir(PNG_DIR)
-            except FileExistsError:
-                pass
 
-            for scn in slides_scn:
-                s_id = scn.split('.')[0]
-                out_dir = PNG_DIR
-                n_x, n_y, lowres, residue_x, residue_y, imglist, imlocpd, ct = \
-                    data_prep.tile(scn, s_id, out_dir=out_dir, std_img=std, path_to_slide=SCN_DIR,
-                                   tile_size=TILE_SIZE, overlap=OVERLAP)
-                imglist = np.asarray(imglist)
-                labs = np.repeat(999, imglist.shape[0])
-                data = tf.data.Dataset.from_tensor_slices((imglist, labs))
-                data_iter = data.batch(batch_size=BATCH_SIZE, drop_remainder=False).make_one_shot_iterator()
-                pred = m.inference(data_iter)
 
-                utils.slide_prediction(pred[:, 1], cutoff=0.5)
-                utils.prob_heatmap(raw_img=lowres, n_x=n_x, n_y=n_y, pred=pred, tile_dic=imlocpd, out_dir=out_dir)
-                utils.plot_example(s_id=s_id, imglist=imglist, pos_score=pred[:, 1],
-                                   tile_dic=imlocpd, out_dir=out_dir, cutoff=0.5)
+    m = MIL.MIL(mode=ARCHITECTURE, log_dir=LOG_DIR, meta_graph=None)
+    #m.pre_train(pretrain_data_path=[PRE_DIR + '/' + f for f in pretrain_tfr],
+     #           valid_data_path=['./tfr_test/0000026280.tfrecords'],
+      #          batch_size=BATCH_SIZE, n_epoch=N_EPOCH, out_dir=METAGRAPH_DIR, save=SAVE)
 
-        else:  # 'retrain'
-            print('Retraining begin...')
-            m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, sample_rate=0.1, n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
-                    save=True, out_dir=METAGRAPH_DIR)
-
-    else:
-        m = MIL.MIL(mode=ARCHITECTURE, log_dir=LOG_DIR, meta_graph=None)
-        #m.pre_train(pretrain_data_path=[PRE_DIR + '/' + f for f in pretrain_tfr],
-         #           valid_data_path=['./tfr_test/0000026280.tfrecords'],
-          #          batch_size=BATCH_SIZE, n_epoch=N_EPOCH, out_dir=METAGRAPH_DIR, save=SAVE)
-
-        m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, sample_rate=0.8,
-                valid_data_path=['./tfr_test/0000026280.tfrecords'],
-                n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
-                save=SAVE, out_dir=METAGRAPH_DIR)
-        print('Trained!')
+    m.train(data_dir=TFR_DIR, slides=slides_tfr, top_k=TOP_K, sample_rate=0.8,
+            valid_data_path=['./tfr_test/0000026280.tfrecords'],
+            n_epoch=N_EPOCH, batch_size=BATCH_SIZE,
+            save=SAVE, out_dir=METAGRAPH_DIR)
+    print('Trained!')
 
 
 if __name__ == "__main__":
@@ -91,10 +59,5 @@ if __name__ == "__main__":
         except FileExistsError:
             pass
 
-    try:
-        TO_RELOAD = sys.argv[1]
-        main(to_reload=TO_RELOAD)
-    except IndexError:
-        main()
-
+    main()
     sys.exit(0)
