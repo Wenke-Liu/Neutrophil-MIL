@@ -18,7 +18,7 @@ def slide_prediction(pos_score, cutoff=0.5):
     print('{} positive tiles in total of {}.'.format(str(pos_ct), str(len(pos_score))))
 
 
-def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, out_dir, cutoff=0.5):
+def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, slide, out_dir, cutoff=0.5):
     tile_dic['pos_score'] = pred[:, 1]
     tile_dic['neg_score'] = pred[:, 0]
     opt = np.full((n_x, n_y), 0)
@@ -65,11 +65,11 @@ def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, out_dir, cutoff=0.5):
     hm_G = hm_G.repeat(50, axis=0).repeat(50, axis=1)
     hm_B = hm_B.repeat(50, axis=0).repeat(50, axis=1)
     hm = np.dstack([hm_B, hm_G, hm_R])
-    cv2.imwrite(out_dir + '/HM.png', hm)
+    cv2.imwrite(out_dir + '/' + slide + '_HM.png', hm)
 
     # superimpose heatmap on scaled original image
     overlay = ori_img * 0.5 + hm * 0.5
-    cv2.imwrite(out_dir + '/Overlay.png', overlay)
+    cv2.imwrite(out_dir + '/' + slide + '_Overlay.png', overlay)
 
 
 def plot_example(s_id, imglist, pos_score, tile_dic, out_dir, cutoff=0.9):
