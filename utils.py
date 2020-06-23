@@ -18,18 +18,18 @@ def slide_prediction(pos_score, cutoff=0.5):
     print('{} positive tiles in total of {}.'.format(str(pos_ct), str(len(pos_score))))
 
 
-def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, slide, out_dir, cutoff=0.5):
+def prob_heatmap(raw_img,  n_x, n_y, pred, tile_dic, slide, out_dir, grid_size=5):
     tile_dic['pos_score'] = pred[:, 1]
     tile_dic['neg_score'] = pred[:, 0]
-    opt = np.full((n_x, n_y), 0)
-    hm_R = np.full((n_x, n_y), 0)
-    hm_G = np.full((n_x, n_y), 0)
-    hm_B = np.full((n_x, n_y), 0)
+    opt = np.full((n_x, n_y), 0, dtype=np.uint8)
+    hm_R = np.full((n_x, n_y), 0, dtype=np.uint8)
+    hm_G = np.full((n_x, n_y), 0, dtype=np.uint8)
+    hm_B = np.full((n_x, n_y), 0, dtype=np.uint8)
 
     # Positive is labeled red in output heat map
     for index, row in tile_dic.iterrows():
         opt[int(row["X_pos"]), int(row["Y_pos"])] = 255
-        if row['pos_score'] >= cutoff:
+        if row['pos_score'] >= 0.5:
             hm_R[int(row["X_pos"]), int(row["Y_pos"])] = 255
             hm_G[int(row["X_pos"]), int(row["Y_pos"])] = int((1 - (row['pos_score'] - 0.5) * 2) * 255)
             hm_B[int(row["X_pos"]), int(row["Y_pos"])] = int((1 - (row['pos_score'] - 0.5) * 2) * 255)
@@ -39,7 +39,7 @@ def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, slide, out_dir, cutoff=0.5):
             hm_R[int(row["X_pos"]), int(row["Y_pos"])] = int((1 - (row['neg_score'] - 0.5) * 2) * 255)
 
     # expand 5 times
-    opt = opt.repeat(50, axis=0).repeat(50, axis=1)
+    opt = opt.repeat(grid_size, axis=0).repeat(grid_size, axis=1)
 
     # small-scaled original image
     ori_img = cv2.resize(raw_img, (np.shape(opt)[0], np.shape(opt)[1]))
@@ -47,7 +47,7 @@ def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, slide, out_dir, cutoff=0.5):
     tq = ori_img[:, :, 0]
     ori_img[:, :, 0] = ori_img[:, :, 2]
     ori_img[:, :, 2] = tq
-    cv2.imwrite(out_dir + '/Original_scaled.png', ori_img)
+    cv2.imwrite(out_dir + '/' + slide + '/Original_scaled.png', ori_img)
 
     # binary output image
     topt = np.transpose(opt)
@@ -55,15 +55,15 @@ def prob_heatmap(raw_img, n_x, n_y, pred, tile_dic, slide, out_dir, cutoff=0.5):
     opt[:, :, 0] = topt
     opt[:, :, 1] = topt
     opt[:, :, 2] = topt
-    cv2.imwrite(out_dir + '/Mask.png', opt * 255)
+    cv2.imwrite(out_dir+ '/' + slide + '/Mask.png', opt * 255)
 
     # output heatmap
     hm_R = np.transpose(hm_R)
     hm_G = np.transpose(hm_G)
     hm_B = np.transpose(hm_B)
-    hm_R = hm_R.repeat(50, axis=0).repeat(50, axis=1)
-    hm_G = hm_G.repeat(50, axis=0).repeat(50, axis=1)
-    hm_B = hm_B.repeat(50, axis=0).repeat(50, axis=1)
+    hm_R = hm_R.repeat(grid_size, axis=0).repeat(grid_size, axis=1)
+    hm_G = hm_G.repeat(grid_size, axis=0).repeat(grid_size, axis=1)
+    hm_B = hm_B.repeat(grid_size, axis=0).repeat(grid_size, axis=1)
     hm = np.dstack([hm_B, hm_G, hm_R])
     cv2.imwrite(out_dir + '/' + slide + '_HM.png', hm)
 
