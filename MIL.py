@@ -17,6 +17,7 @@ https://github.com/MSKCC-Computational-Pathology/MIL-nature-medicine-2019
 Implemented in Tensorflow 1.10
 """
 
+
 class MIL:
 
     """
@@ -281,7 +282,7 @@ class MIL:
 
         def sample_slide(ds, rand, rate):  # random sample from the whole slide, based on the sample_rate argument
             if not sample_rate:
-                iter = ds.data_iter()
+                iter = ds.shuffled_iter()
 
             else:
                 def sample_fn(data, rind):  # random sample from the whole slide, based on the sample_rate argument
@@ -336,21 +337,25 @@ class MIL:
                         try:
                             imgs, labs = self.sesh.run(next_tfr_batch)
                             batch_pred = self.inference(imgs)[:, 1]
+                            batch_top_ind = batch_pred.argsort()[-top_k:]  # index of largest k probabilities
                             slide_counter += imgs.shape[0]
-                            batch_top_ind = batch_pred.argsort()[-1]  # index of largest probability
-                            batch_top = batch_pred[batch_top_ind]
 
-                            if batch_top >= np.sort(np.array(slide_prob))[-2]:
-                                slide_prob.append(batch_pred[batch_top_ind])
-                                slide_img.append(imgs[batch_top_ind])
-                                slide_lab.append(labs[batch_top_ind])
-                            else:
-                                pass
+                            for top_ind in batch_top_ind:
+                                top_prob = batch_pred[top_ind]
+                                #print(top_ind)
+                                #print(top_prob)
+                                if (slide_counter <= top_k*batch_size or
+                                        top_prob >= np.sort(np.array(slide_prob))[-top_k]):
+                                    slide_prob.append(batch_pred[top_ind])
+                                    slide_img.append(imgs[top_ind])
+                                    slide_lab.append(labs[top_ind])
+                                else:
+                                    pass
 
                         except tf.errors.OutOfRangeError:
                             break
 
-                        slide_prob_ind = np.asarray(slide_prob).argsort()[:-2]
+                        slide_prob_ind = np.asarray(slide_prob).argsort()[:-top_k]
                         for ind in sorted(slide_prob_ind, reverse=True):
                             del slide_prob[ind]
                             del slide_img[ind]
